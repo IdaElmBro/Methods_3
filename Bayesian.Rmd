@@ -1,0 +1,54 @@
+---
+title: "Bayesian"
+author: "Ida Elmose Brøcker"
+date: '2022-09-04'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r brms}
+
+install.packages("brms")
+
+if (!requireNamespace("remotes")) {
+  install.packages("remotes")
+}
+remotes::install_github("paul-buerkner/brms")
+
+
+```
+
+
+```{r CmdStanR}
+
+install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+
+
+library(cmdstanr)
+check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
+library(posterior)
+library(bayesplot)
+color_scheme_set("brightblue")
+
+
+check_cmdstan_toolchain()
+
+install_cmdstan(cores = 2)
+
+```
+
+```{r basics}
+
+pacman::p_load(tidyverse)
+pacman::p_load(rstanarm)
+tinytex::install_tinytex()
+
+childiq <- read.csv("child_iq.csv")
+head(childiq)
+
+```
+
