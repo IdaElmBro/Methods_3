@@ -1,0 +1,1207 @@
+---
+title: "Assignment 1 - Language development in autistic and neurotypical children"
+output: html_document
+date: "2022-08-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Assignment 1  - Language development in autistic and neurotypical children
+
+## Quick recap
+Autism Spectrum Disorder is often related to language impairment. However, this phenomenon has rarely been empirically traced in detail: i) relying on actual naturalistic language production, ii) over extended periods of time.
+
+We therefore videotaped circa 30 kids with ASD and circa 30 comparison kids (matched by linguistic performance at visit 1) for ca. 30 minutes of naturalistic interactions with a parent. We repeated the data collection 6 times per kid, with 4 months between each visit. We transcribed the data and counted: 
+i) the amount of words that each kid uses in each video. Same for the parent.
+ii) the amount of unique words that each kid uses in each video. Same for the parent.
+iii) the amount of morphemes per utterance (Mean Length of Utterance) displayed by each child in each video. Same for the parent. 
+
+This data is in the file you prepared in the previous class, but you can also find it here:https://www.dropbox.com/s/d6eerv6cl6eksf3/data_clean.csv?dl=0
+
+
+## The structure of the assignment
+
+We will be spending a few weeks with this assignment. In particular, we will:
+
+Part 1) simulate data in order to better understand the model we need to build, and to better understand how much data we would have to collect to run a meaningful study (precision analysis)
+
+Part 2) analyze our empirical data and interpret the inferential results
+
+Part 3) use your model to predict the linguistic trajectory of new children and assess the performance of the model based on that.
+
+As you work through these parts, you will have to produce a written document (separated from the code) answering the following questions:
+
+Q1 - Briefly describe your simulation process, its goals, and what you have learned from the simulation. Add at least a plot showcasing the results of the simulation. Make a special note on sample size considerations: how much data do you think you will need? what else could you do to increase the precision of your estimates?
+
+Q2 - Briefly describe the empirical data and how they compare to what you learned from the simulation (what can you learn from them?). Briefly describe your model(s) and model quality. Report the findings: how does development differ between autistic and neurotypical children (N.B. remember to report both population and individual level findings)? which additional factors should be included in the model? Add at least one plot showcasing your findings.
+
+Q3 - Given the model(s) from Q2, how well do they predict the data? Discuss both in terms of absolute error in training vs testing; and in terms of characterizing the new kids' language development as typical or in need of support.
+
+
+Below you can find more detailed instructions for each part of the assignment.
+
+## Part 1 - Simulating data
+
+Before we even think of analyzing the data, we should make sure we understand the problem, and we plan the analysis. To do so, we need to simulate data and analyze the simulated data (where we know the ground truth).
+
+In particular, let's imagine we have n autistic and n neurotypical children. We are simulating their average utterance length (Mean Length of Utterance or MLU) in terms of words, starting at Visit 1 and all the way to Visit 6.
+In other words, we need to define a few parameters:
+- average MLU for ASD (population mean) at Visit 1 and average individual deviation from that (population standard deviation)
+- average MLU for TD (population mean) at Visit 1 and average individual deviation from that (population standard deviation)
+- average change in MLU by visit for ASD (population mean) and average individual deviation from that (population standard deviation)
+- average change in MLU by visit for TD (population mean) and average individual deviation from that (population standard deviation)
+- an error term. Errors could be due to measurement, sampling, all sorts of noise. 
+
+Note that this makes a few assumptions: population means are exact values; change by visit is linear (the same between visit 1 and 2 as between visit 5 and 6). This is fine for the exercise. In real life research, you might want to vary the parameter values much more, relax those assumptions and assess how these things impact your inference.
+
+
+We go through the literature and we settle for some values for these parameters:
+- average MLU for ASD and TD: 1.5 (remember the populations are matched for linguistic ability at first visit)
+- average individual variability in initial MLU for ASD 0.5; for TD 0.3 (remember ASD tends to be more heterogeneous)
+- average change in MLU for ASD: 0.4; for TD 0.6 (ASD is supposed to develop less)
+- average individual variability in change for ASD 0.4; for TD 0.2 (remember ASD tends to be more heterogeneous)
+- error is identified as 0.2
+
+This would mean that on average the difference between ASD and TD participants is 0 at visit 1, 0.2 at visit 2, 0.4 at visit 3, 0.6 at visit 4, 0.8 at visit 5 and 1 at visit 6.
+
+With these values in mind, simulate data, plot the data (to check everything is alright); and set up an analysis pipeline.
+Remember the usual bayesian workflow:
+- define the formula
+- define the prior
+- prior predictive checks
+- fit the model
+- model quality checks: traceplots, divergences, rhat, effective samples
+- model quality checks: posterior predictive checks, prior-posterior update checks
+- model comparison
+
+Once the pipeline is in place, loop through different sample sizes to assess how much data you would need to collect. N.B. for inspiration on how to set this up, check the tutorials by Kurz that are linked in the syllabus.
+
+BONUS questions for Part 1: what if the difference between ASD and TD was 0? how big of a sample size would you need? What about different effect sizes, and different error terms?
+
+```{r}
+
+pacman::p_load(tidyverse, 
+       glue,
+       data.table,
+       dplyr,
+       moments,
+       tidybayes,
+       ggplot2,
+       ggridges,
+       plyr,
+       ellipse,
+       brms,
+       cowplot,
+       viridis)
+
+```
+
+
+
+```{r}
+#Part 1) simulate data in order to better understand the model we need to build, and to better understand how much data we would #have to collect to run a meaningful study (precision analysis)
+
+set.seed(1234)
+
+#define parameters 
+mu_asd <- log(1.5)
+sigma_asd <- log(1.5)-log(1.5-0.5)
+mu_td <- log(1.5)
+sigma_td <- log(1.5)-log(1.5 - 0.3)
+
+log(1.5)-log(1.5 - 0.3)
+
+
+# hist(rnorm(1e4, 0.1, 0.1))
+mu_visit_asd <-  0.10
+sigma_visit_asd <- 0.07
+
+mu_visit_td <-0.15
+sigma_visit_td <- 0.05
+
+error <- 0.15
+
+n <- 30 #samme som i den rigtige data
+visit <- 6
+
+#Making a function for simulating data
+s_d <- function(n, visit, mu_asd, mu_td, sigma_asd, sigma_td, error){
+  s_df <- tibble(expand.grid(ID=seq(n), 
+                           Diag= c("ASD", "TD"), 
+                           Visit = seq(visit))) %>% 
+    mutate(ID = ifelse(Diag == "TD", ID + (n*2), ID), IndividualIntercept = NA, 
+           IndividualSlope = NA, 
+           MLU = NA)
+
+  for (i in seq(s_df$ID)) {
+    #Assigning individual intercept
+    s_df$IndividualIntercept[s_df$ID == i & s_df$Diag == "ASD"] <- rnorm(1, mu_asd, sigma_asd)
+    s_df$IndividualIntercept[s_df$ID == i & s_df$Diag == "TD"] <- rnorm(1, mu_td, sigma_td)
+
+    #Assigning individual slope
+    s_df$IndividualSlope[s_df$ID == i & s_df$Diag == "ASD"] <- rnorm(n, mu_visit_asd, sigma_visit_asd)
+    s_df$IndividualSlope[s_df$ID == i & s_df$Diag == "TD"] <- rnorm(n, mu_visit_td, sigma_visit_td)
+  }
+
+  for (i in seq(nrow(s_df))){
+  s_df$MLU[i] <- exp(rnorm(1, (s_df$IndividualIntercept[i] + s_df$IndividualSlope[i] * (s_df$Visit[i]-1)), error))
+                  }
+
+  return(s_df)
+}
+
+d <- s_d(n, visit, mu_asd, mu_td, sigma_asd, sigma_td, error)
+
+
+#Visualizing data
+ggplot(d, aes(Visit, MLU, color = Diag, group = ID)) + 
+theme_bw() + 
+geom_point() + 
+geom_line(alpha = 0.3)
+
+
+```
+
+
+```{r}
+
+
+
+```
+
+With these values in mind, simulate data, plot the data (to check everything is alright); and set up an analysis pipeline.
+Remember the usual bayesian workflow:
+- define the formula
+- define the prior
+- prior predictive checks
+- fit the model
+- model quality checks: traceplots, divergences, rhat, effective samples
+- model quality checks: posterior predictive checks, prior-posterior update checks
+- model comparison
+
+Once the pipeline is in place, loop through different sample sizes to assess how much data you would need to collect. N.B. for inspiration on how to set this up, check the tutorials by Kurz that are linked in the syllabus.
+
+BONUS questions for Part 1: what if the difference between ASD and TD was 0? how big of a sample size would you need? What about different effect sizes, and different error terms?
+
+
+```{r}
+
+#define the formula
+
+glimpse(d)
+
+
+#different models 
+
+MLU_f0 <- bf(MLU ~ 1)
+
+MLU_f1<-bf(MLU ~ 0 + Diag)
+
+MLU_f2 <-bf(MLU ~ 0 + Diag + Diag:Visit)
+
+MLU_f3 <-bf(MLU ~ 0 + Diag + Diag:Visit + (1 + Visit|ID)) ## we will use this one
+
+
+
+```
+
+
+```{r}
+#define the prior
+
+#get priors
+get_prior(MLU_f0,
+          data = d,
+          family = lognormal)
+
+get_prior(MLU_f1,
+          data = d,
+          family = lognormal)
+
+get_prior(MLU_f2,
+          data = d,
+          family = lognormal)
+
+get_prior(MLU_f3,
+          data = d,
+          family = lognormal)
+
+
+
+
+
+```
+
+```{r}
+#making priors
+MLU_f1_prior <- c(
+  prior(normal(0.41, 0.41), class=b, coef= "DiagASD"),
+  prior(normal(0.41, 0.22), class=b, coef= "DiagTD"),
+  prior(normal(0, 2), class= sigma)
+)
+
+MLU_f2_prior <- c(
+  prior(normal(0, 0.2), class=b, lb=0), #error and lb=lower boundries
+  prior(normal(0.41, 0.41), class=b, coef= "DiagASD"),
+  prior(normal(0.41, 0.22), class=b, coef= "DiagTD"),
+  prior(normal(0.15, 0.1), class=b, coef= "DiagASD:Visit"),
+  prior(normal(0.2, 0.08), class=b, coef= "DiagTD:Visit"),
+  prior(normal(0, 0.2), class= sigma)
+)
+
+MLU_f3_prior <- c(
+  prior(normal(0, 0.2), class=b, lb=0),
+  prior(normal(0.41, 0.41), class=b, coef= "DiagASD"), # 0.41 is = log(1.5) - is our given intercept
+  prior(normal(0.41, 0.22), class=b, coef= "DiagTD"),   # 0.22 is = sigma (sigma_asd <- log(1.5)-log(1.5-0.5))
+  prior(normal(0, 0.07), class=b, coef= "DiagASD:Visit"), #weekkly informed, so 0 and our standard deviation
+  prior(normal(0, 0.05), class=b, coef= "DiagTD:Visit"), # standard deviation from our simulations 
+  prior(normal(0, 0.2), class=sd, coef= Intercept, group=ID), #allowing the intercept for each person to varriate with 40% (because of logscale)
+  prior(normal(0, 0.1), class=sd, coef= Visit, group=ID), #slope to varriate with 20% for each person
+  prior(normal(0, 0.15), class= sigma),
+  prior(lkj(1), class= "cor") 
+)
+
+MLU_f1_prior_samp <- 
+  brm(
+    MLU_f1, 
+    data = d,
+    family = lognormal,
+    prior = MLU_f1_prior,  
+    sample_prior = "only", 
+    iter = 2000,
+    warmup = 500,
+    backend = "cmdstanr",
+    threads = threading(2),
+    cores = 2,
+    chains = 2,
+    file = "MLU_f1_prior_samp",
+    control = list(adapt_delta = 0.99, max_treedepth = 20))
+
+
+MLU_f2_prior_samp <- 
+  brm(
+    MLU_f2, 
+    data = d,
+    family = lognormal,
+    prior = MLU_f2_prior,  
+    sample_prior = "only", 
+    iter = 2000,
+    warmup = 500,
+    backend = "cmdstanr",
+    threads = threading(2),
+    cores = 2,
+    chains = 2,
+    file = "MLU_f2_prior_samp",
+    control = list(adapt_delta = 0.99, max_treedepth = 20))
+
+
+MLU_f3_prior_samp <- 
+  brm(
+    MLU_f3, 
+    data = d,
+    family = lognormal,
+    prior = MLU_f3_prior,  
+    sample_prior = "only", 
+    iter = 2000,
+    warmup = 500,
+    backend = "cmdstanr",
+    threads = threading(2),
+    cores = 2,
+    chains = 2,
+    file = "MLU_f3_prior_sam",
+    control = list(adapt_delta = 0.99, max_treedepth = 20))
+```
+
+
+```{r}
+#prior predictive checks
+
+#pp checking the priors 
+pp_check(MLU_f1_prior_samp, ndraws = 100)
+pp_check(MLU_f2_prior_samp, ndraws = 100)
+pp_check(MLU_f3_prior_samp, ndraws = 100) + ggtitle('Model 3 Prior-predictive check') + xlim(0, 25)
+
+```
+
+```{r}
+
+
+```
+
+
+```{r}
+
+#fit the model
+#posterior 
+
+MLU_model1_posterior <- brm(
+  MLU_f1, 
+  data = d,
+  family = lognormal,
+  prior = MLU_f1_prior,
+  sample_prior = T, 
+  backend = "cmdstanr",
+  threads = threading(2),
+  cores = 2, 
+  chains = 2,
+  file = "MLU_model1_prior_post",
+  control = list(
+    adapt_delta = 0.99,
+    max_treedepth = 20
+  )
+)
+
+MLU_model2_posterior <- brm(
+  MLU_f2, 
+  data = d,
+  family = lognormal,
+  prior = MLU_f2_prior,
+  sample_prior = T, 
+  backend = "cmdstanr",
+  threads = threading(2),
+  cores = 2, 
+  chains = 2,
+  file = "MLU_model2_prior_post",
+  control = list(
+    adapt_delta = 0.99,
+    max_treedepth = 20
+  )
+)
+MLU_model3_posterior <- brm(
+  MLU_f3, 
+  data = d,
+  family = lognormal,
+  prior = MLU_f3_prior,
+  sample_prior = T, 
+  backend = "cmdstanr",
+  threads = threading(2),
+  cores = 2, 
+  chains = 2,
+  file = "MLU_model3_prior_post",
+  control = list(
+    adapt_delta = 0.99,
+    max_treedepth = 20
+  )
+)
+
+
+
+
+pp_check(MLU_model1_posterior, ndraws = 100)
+pp_check(MLU_model2_posterior , ndraws = 100)
+pp_check(MLU_model3_posterior, ndraws = 100) + ggtitle('Model 3 Posterior-predictive check') + xlim(0, 25)
+
+```
+
+
+```{r}
+#plotting prior-posterior update-check
+
+
+Posterior_3 <- as_draws_df(MLU_model3_posterior)
+
+p4 <- ggplot(Posterior_3) +
+  geom_histogram(aes(prior_cor_ID),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(cor_ID__Intercept__Visit),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +
+    theme_bw() +
+    xlab("Prior-posterior update check on the correlation")
+
+p0 <- ggplot(Posterior_3) +
+  geom_histogram(aes(prior_sd_ID__Visit),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(sd_ID__Visit),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +
+    theme_bw() +
+    xlab("P-P update check - variability of slope")
+
+
+p1 <- ggplot(Posterior_3) +
+  geom_histogram(aes(`prior_b_DiagASD:Visit`),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(`b_DiagASD:Visit`),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +
+   geom_histogram(aes(`b_DiagTD:Visit`),
+                 fill = "yellow", color = "yellow", alpha = 0.3, bins = 50) +  
+    theme_bw() +
+    xlab("Prior-posterior update check - slope by visit")
+
+
+#model 2
+Posterior_3 <- as_draws_df(MLU_model3_posterior)
+
+p2 <- ggplot(Posterior_3) +
+  geom_histogram(aes(prior_sd_ID__Intercept),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+   geom_histogram(aes(sd_ID__Intercept),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +  
+    theme_bw() +
+    xlab("P-P update check - variability of intercepts")
+
+#model 3
+
+p3 <- ggplot(Posterior_3) +
+  geom_histogram(aes(prior_b_DiagASD),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(b_DiagASD),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +
+   geom_histogram(aes(b_DiagTD),
+                 fill = "yellow", color = "yellow", alpha = 0.3, bins = 50) +  
+    theme_bw() +
+    xlab("Prior-posterior update check - intercepts")
+
+
+#show them
+p0
+p1
+p2
+p3
+p4
+
+pacman::p_load("gridExtra")
+grid.arrange(p0,p1,p2,p3)
+
+glimpse(Posterior_3)
+```
+
+
+```{r}
+
+
+
+ ggplot(Posterior_3) +
+  geom_density(aes(`prior_b_DiagASD:Visit`), fill="steelblue", color="black",alpha=0.6) +
+  geom_density(aes(`b_DiagASD:Visit`), fill="#FC4E07", color="black",alpha=0.6) + 
+  labs(title = "ASD Intercept")+
+  theme_bw()
+
+
+ggplot(Posterior_3) +
+  geom_density(aes(sd_ID__Intercept), fill="#FC4E07", color="black",alpha=0.3) + 
+  geom_density(aes(sd_ID__Visit), fill="#228B22", color="black",alpha=0.4) + 
+  geom_density(aes(prior_sd_ID__Visit), fill="steelblue", color="black",alpha=0.6) +
+  xlab('sd') +
+  labs(title="Model 3, for intercepts and slopes") +
+  theme_classic()
+
+```
+
+
+```{r}
+#precision analysis 
+### model quality checks: traceplots, divergences, rhat, effective samples
+
+summary(MLU_model1_posterior)
+summary(MLU_model2_posterior)
+summary(MLU_model3_posterior)
+
+
+
+plot(conditional_effects(MLU_model1_posterior), points = T)
+plot(conditional_effects(MLU_model2_posterior), points = T)
+plot(conditional_effects(MLU_model3_posterior), points = T)
+
+#traceplot - random scatter around the mean value
+
+
+plot(MLU_model3_posterior, ask = FALSE, N = 4)
+
+
+
+
+
+```
+
+```{r}
+
+#divergence plot - #look like an l
+pacman::p_load("bayesplot", "gridExtra")
+
+
+p1 <- mcmc_parcoord(
+  MLU_model3_posterior,
+  pars = vars(matches('^b')),
+  size = .25, 
+  alpha = .01,
+  np = nuts_params(MLU_model3_posterior),  # without this div trans won't be highlighted
+  np_style = parcoord_style_np(
+    div_color = "#ff5500",
+    div_size = 1,
+    div_alpha = .1
+  )
+) +
+  guides(x = guide_axis(n.dodge = 2)) +
+  theme(
+    axis.text.x = element_text(size = 6),
+    panel.grid.major.x = element_line(color = '#00AAFF80', size = .1)
+  ) +ggtitle('Model 1')
+
+
+#divergence plot - #look like an l
+
+p2 <- mcmc_parcoord(
+  MLU_model2_posterior,
+  pars = vars(matches('^b')),
+  size = .25, 
+  alpha = .01,
+  np = nuts_params(MLU_model2_posterior),  # without this div trans won't be highlighted
+  np_style = parcoord_style_np(
+    div_color = "#ff5500",
+    div_size = 1,
+    div_alpha = .1
+  )
+) +
+  guides(x = guide_axis(n.dodge = 2)) +
+  theme(
+    axis.text.x = element_text(size = 6),
+    panel.grid.major.x = element_line(color = '#00AAFF80', size = .1)
+  ) +ggtitle('Model 2')
+
+
+#divergence plot - #look like an l
+p3 <- mcmc_parcoord(
+  MLU_model1_posterior,
+  pars = vars(matches('^b')),
+  size = .25, 
+  alpha = .01,
+  np = nuts_params(MLU_model1_posterior),  # without this div trans won't be highlighted
+  np_style = parcoord_style_np(
+    div_color = "#ff5500",
+    div_size = 1,
+    div_alpha = .1
+  )
+) +
+  guides(x = guide_axis(n.dodge = 2)) +
+  theme(
+    axis.text.x = element_text(size = 6),
+    panel.grid.major.x = element_line(color = '#00AAFF80', size = .1)
+  )+ggtitle('Model 3')
+
+
+divergency <- grid.arrange(p1,p2,p3,
+                           nrow=2,
+                           top="Divergency plots")
+ggsave('divergency.png')
+
+
+```
+
+```{r}
+
+
+#model comparison 
+
+#cross-validation 
+
+#loo comparison (leave-one-out cross validation)
+MLU_m1 <- add_criterion(MLU_model1_posterior, criterion = "loo")
+MLU_m2 <- add_criterion(MLU_model2_posterior, criterion = "loo")
+MLU_m3 <- add_criterion(MLU_model3_posterior, criterion = "loo")
+
+
+loo_compare(MLU_m1, MLU_m2, MLU_m3)
+#The negative difference indicates that the first model (estimating mu) is better, from our posterior distribution for mu.
+
+d$looic3 <- MLU_m3$criteria$loo$pointwise[,"looic"]
+d$looic2 <- MLU_m2$criteria$loo$pointwise[,"looic"]
+d$looic1 <- MLU_m1$criteria$loo$pointwise[,"looic"]
+
+
+ggplot(d,aes(x = ID, y =looic1,
+             color = Diag)) + geom_point() + theme_bw()
+ggplot(d,aes(x = ID, y =looic2,
+             color = Diag)) + geom_point() + theme_bw()
+ggplot(d,aes(x = ID, y =looic3,
+             color = Diag)) + geom_point() + theme_bw()
+```
+
+
+
+
+
+
+
+
+```{r}
+#do the update thing kurtz
+
+#fitted models
+#MLU_model1_posterior
+#MLU_model2_posterior
+#MLU_model3_posterior
+
+
+# simulate the data
+
+# Making a custom model-fitting function 
+sim_d <- function(seed,n){
+  set.seed(seed)
+  
+   s_df <- tibble(expand.grid(ID=seq(n), 
+                           Diag= c("ASD", "TD"), 
+                           Visit = seq(visit)),
+   IndivdualIntercept = as.numeric(0),
+   IndividualSlope = as.numeric(0),
+   MLU = as.numeric(0))
+
+s_df <- s_df %>% 
+  mutate(ID = ifelse(Diag == "TD", ID + (n*2), ID))
+
+
+
+  for (i in seq(s_df$ID)) {
+    s_df$IndividualIntercept[s_df$ID == i & s_df$Diag == "ASD"] <- rnorm(1, mu_asd, sigma_asd)
+    s_df$IndividualIntercept[s_df$ID == i & s_df$Diag == "TD"] <- rnorm(1, mu_td, sigma_td)
+
+    s_df$IndividualSlope[s_df$ID == i & s_df$Diag == "ASD"] <- rnorm(1, mu_visit_asd, sigma_visit_asd)
+    s_df$IndividualSlope[s_df$ID == i & s_df$Diag == "TD"] <- rnorm(1, mu_visit_td, sigma_visit_td)
+  }
+
+  for (i in seq(nrow(s_df))){
+  s_df$MLU[i] <- exp(rnorm(1, (s_df$IndividualIntercept[i] + s_df$IndividualSlope[i] * (s_df$Visit[i]-1)), error))
+                  }
+
+  return(s_df)
+}
+
+```
+
+```{r}
+
+###update Kurz 30!!
+n_sim <- 100
+
+# this will help us track time
+t1 <- Sys.time()
+
+# here's the main event!
+m3 <-tibble(seed = 1:n_sim) %>%
+mutate(d = map(seed, sim_d, n = 30)) %>%
+mutate(fit = map2(d, seed, ~update(MLU_model3_posterior, newdata = .x, seed = .y,iter=1000)))
+
+
+t2 <- Sys.time()
+
+t2 - t1
+
+parameters3 <-
+  m3 %>% 
+  mutate(parameter = map(fit, ~ fixef(.) %>% 
+                           data.frame() %>% 
+                           rownames_to_column("parameter"))) %>% 
+  unnest(parameter)
+
+
+power3 <- parameters3 %>% 
+filter(parameter == "DiagASD:Visit") %>% 
+  mutate(check = ifelse(Q2.5 > 0, 1, 0)) %>% 
+  summarise(power = mean(check))
+power3
+
+width3 <- parameters3 %>% 
+  filter(parameter == "DiagASD") %>% 
+   mutate(width = Q97.5 - Q2.5) %>% 
+   summarise(`average width`= mean(width))
+width3
+
+
+
+p30 <-
+parameters3 %>%
+  filter(parameter == "DiagASD") %>% 
+  ggplot(aes(x = reorder(seed, Q2.5), y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  geom_hline(yintercept = c(0, .5), color = "white") +
+  geom_pointrange(fatten = 1/2) +
+  scale_x_discrete("reordered by the lower level of the 95% intervals", breaks = NULL) +
+  ylab(expression(beta[1])) +
+  coord_cartesian(ylim = c(0, 0.7))
+p30
+
+ pp30 <- parameters3 %>% 
+  filter(parameter == "DiagASD") %>% 
+ ggplot(aes(x = seed, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  geom_hline(yintercept = c(0, .5), color = "white") +
+geom_pointrange(fatten = 1/2) +
+  labs(x = "seed (i.e., simulation index)",
+       y = expression(beta[1]))
+
+```
+
+  
+```{r}
+
+###update Kurz 50!!
+n_sim <- 100
+
+# this will help us track time
+t1 <- Sys.time()
+
+# here's the main event!
+m5 <-tibble(seed = 1:n_sim) %>%
+mutate(d = map(seed, sim_d, n = 50)) %>%
+mutate(fit = map2(d, seed, ~update(MLU_model3_posterior, newdata = .x, seed = .y,iter=1000)))
+
+
+t2 <- Sys.time()
+
+t2 - t1
+
+parameters5 <-
+  m5 %>% 
+  mutate(parameter = map(fit, ~ fixef(.) %>% 
+                           data.frame() %>% 
+                           rownames_to_column("parameter"))) %>% 
+  unnest(parameter)
+
+
+power5 <- parameters5 %>% 
+filter(parameter == "DiagASD:Visit") %>% 
+  mutate(check = ifelse(Q2.5 > 0, 1, 0)) %>% 
+  summarise(power = mean(check))
+power5
+  
+width5 <- parameters5 %>% 
+  filter(parameter == "DiagASD") %>% 
+   mutate(width = Q97.5 - Q2.5) %>% 
+   summarise(`average width`= mean(width))
+width5
+
+p50 <-
+parameters5 %>%
+  filter(parameter == "DiagASD") %>% 
+  ggplot(aes(x = reorder(seed, Q2.5), y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  geom_hline(yintercept = c(0, .5), color = "white") +
+  geom_pointrange(fatten = 1/2) +
+  scale_x_discrete("reordered by the lower level of the 95% intervals", breaks = NULL) +
+  ylab(expression(beta[1])) +
+  coord_cartesian(ylim = c(0, 0.7))
+
+ pp50 <- parameters5%>% 
+  filter(parameter == "DiagASD") %>% 
+ ggplot(aes(x = seed, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  geom_hline(yintercept = c(0, .5), color = "white") +
+geom_pointrange(fatten = 1/2) +
+  labs(x = "seed (i.e., simulation index)",
+       y = expression(beta[1]))
+
+```
+  
+  
+```{r}
+###update Kurz 100!!
+n_sim <- 100
+
+# this will help us track time
+t1 <- Sys.time()
+
+# here's the main event!
+m10 <-tibble(seed = 1:n_sim) %>%
+mutate(d = map(seed, sim_d, n = 100)) %>%
+mutate(fit = map2(d, seed, ~update(MLU_model3_posterior, newdata = .x, seed = .y,iter=1000)))
+
+
+t2 <- Sys.time()
+
+t2 - t1
+
+parameters10 <-
+  m10 %>% 
+  mutate(parameter = map(fit, ~ fixef(.) %>% 
+                           data.frame() %>% 
+                           rownames_to_column("parameter"))) %>% 
+  unnest(parameter)
+
+
+power10 <- parameters10 %>% 
+filter(parameter == "DiagASD:Visit") %>% 
+  mutate(check = ifelse(Q2.5 > 0, 1, 0)) %>% 
+  summarise(power = mean(check))
+power10  
+
+width10 <- parameters10 %>% 
+  filter(parameter == "DiagASD") %>% 
+   mutate(width = Q97.5 - Q2.5) %>% 
+   summarise(`average width`= mean(width))
+width10
+
+
+
+ pp100 <- parameters10 %>% 
+  filter(parameter == "DiagASD") %>% 
+ ggplot(aes(x = seed, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  geom_hline(yintercept = c(0, .5), color = "white") +
+geom_pointrange(fatten = 1/2) +
+  labs(x = "seed (i.e., simulation index)",
+       y = expression(beta[1]))
+  
+
+p100 <-
+parameters10 %>%
+  filter(parameter == "DiagASD") %>% 
+  ggplot(aes(x = reorder(seed, Q2.5), y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  geom_hline(yintercept = c(0, .5), color = "white") +
+  geom_pointrange(fatten = 1/2) +
+  scale_x_discrete("reordered by the lower level of the 95% intervals", breaks = NULL) +
+  ylab(expression(beta[1])) +
+  coord_cartesian(ylim = c(0, 0.7))
+p100
+
+precision <- gridExtra::grid.arrange(pp30,pp50, pp100,top='Sample size 30, 50 and 100')
+ggsave('precision.png',precision)
+
+
+
+
+```
+
+
+# Part 2 - Strong in the Bayesian ken, you are now ready to analyse the actual data
+
+Q2 - Briefly describe the empirical data and how they compare to what you learned from the simulation (what can you learn from them?). Briefly describe your model(s) and model quality. Report the findings: how does development differ between autistic and neurotypical children (N.B. remember to report both population and individual level findings)? which additional factors should be included in the model? Add at least one plot showcasing your findings.
+
+
+- Describe your sample (n, age, gender, clinical and cognitive features of the two groups) and critically assess whether the groups (ASD and TD) are balanced. Briefly discuss whether the data is enough given the simulations in part 1.
+- Describe linguistic development (in terms of MLU over time) in TD and ASD children (as a function of group). Discuss the difference (if any) between the two groups.
+- Describe individual differences in linguistic development: do all kids follow the same path? Are all kids reflected by the general trend for their group?
+
+- Include additional predictors in your model of language development (N.B. not other indexes of child language: types and tokens, that'd be cheating). Identify the best model, by conceptual reasoning, model comparison or a mix. Report the model you choose (and name its competitors, if any) and discuss why it's the best model.
+
+```{r}
+#sample size #33 in simulation as in actual data 
+
+
+####PART 2
+
+#lave samme priors som part 1
+#lave posterior med rigtige data 
+#lave prior-posterior-update-plot med real data (divergensy plot??) 
+#summary 
+#hypothesis testing 
+#eventuel rubostnus check
+
+
+#load in data
+pacman::p_load(tidyverse, 
+       glue,
+       data.table,
+       dplyr,
+       moments,
+       tidybayes,
+       ggplot2,
+       ggridges,
+       plyr,
+       ellipse,
+       brms,
+       cowplot,
+       viridis)
+
+#load in data 
+df <- read.csv("data_clean.csv")
+
+df
+
+#filter out NA's
+df <- replace(df, df==0, NA)
+
+df <- df %>% drop_na(CHI_MLU)
+
+
+
+#Visualizing data
+ggplot(df, aes(Visit, CHI_MLU, color = Diagnosis, group = Child.ID)) + 
+theme_bw() + 
+geom_point() + 
+geom_line(alpha = 0.3)
+```
+
+
+```{r}
+
+
+#our model
+
+real_MLU_f3 <-bf(CHI_MLU ~ 0 + Diagnosis + Diagnosis:Visit + (1 + Visit|Child.ID)) ## we will use this one
+
+
+
+
+#using the same priors as in the simulated data
+real_MLU_f3_prior <- c(
+  prior(normal(0, 0.2), class=b, lb=0),
+  prior(normal(0.41, 0.41), class=b, coef= "DiagnosisASD"), # 0.41 is = log(1.5) - is our given intercept
+  prior(normal(0.41, 0.22), class=b, coef= "DiagnosisTD"),   # 0.22 is = sigma (sigma_asd <- log(1.5)-log(1.5-0.5))
+  prior(normal(0, 0.07), class=b, coef= "DiagnosisASD:Visit"), #weekkly informed, so 0 and our standard deviation
+  prior(normal(0, 0.05), class=b, coef= "DiagnosisTD:Visit"), # standard deviation from our simulations 
+  prior(normal(0, 0.2), class=sd, coef= Intercept, group=Child.ID), #allowing the intercept for each person to varriate with 40% (because of logscale)
+  prior(normal(0, 0.1), class=sd, coef= Visit, group=Child.ID), #slope to varriate with 20% for each person
+  prior(normal(0, 0.15), class= sigma),
+  prior(lkj(1), class= "cor") 
+)
+
+
+
+real_MLU_f3_prior_samp <- 
+  brm(
+    real_MLU_f3, 
+    data = df,
+    family = lognormal,
+    prior = MLU_f3_prior,  
+    sample_prior = "only", 
+    iter = 2000,
+    warmup = 500,
+    backend = "cmdstanr",
+    threads = threading(2),
+    cores = 2,
+    chains = 2,
+    file = "MLU_f3_prior_sam",
+    control = list(adapt_delta = 0.99, max_treedepth = 20))
+
+pp_check(real_MLU_f3_prior_samp, ndraws = 100) +xlim(0, 30) + ggtitle('Model 3 Prior-predictive check on real data') 
+
+
+```
+
+
+```{r}
+#making posterior with real data
+real_MLU_model3_posterior <- brm(
+  real_MLU_f3, 
+  data = df,
+  family = lognormal,
+  prior = real_MLU_f3_prior,
+  sample_prior = T, 
+  backend = "cmdstanr",
+  threads = threading(2),
+  cores = 2, 
+  chains = 2,
+  file = "real_MLU_model3_prior_post",
+  control = list(
+    adapt_delta = 0.99,
+    max_treedepth = 20
+  )
+)
+
+#make posterior-predictive check
+pp_check(real_MLU_model3_posterior, ndraws = 100) + ggtitle('Model 3 Posterior-predictive check on real data') + xlim(0, 25)
+```
+
+
+
+
+```{r}
+#make prior-posterior update check
+real_Posterior_3 <- as_draws_df(real_MLU_model3_posterior)
+
+p4 <- ggplot(real_Posterior_3) +
+  geom_histogram(aes(prior_cor_Child.ID),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(cor_Child.ID__Intercept__Visit),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +
+    theme_bw() +
+    xlab("Prior-posterior update check on the correlation")
+
+p0 <- ggplot(real_Posterior_3) +
+  geom_histogram(aes(prior_sd_Child.ID__Visit),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(sd_Child.ID__Visit),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +
+    theme_bw() +
+    xlab("P-P update check - variability of slope")
+
+
+p1 <- ggplot(real_Posterior_3) +
+  geom_histogram(aes(`prior_b_DiagnosisASD:Visit`),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(`b_DiagnosisASD:Visit`),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +
+   geom_histogram(aes(`b_DiagnosisTD:Visit`),
+                 fill = "yellow", color = "yellow", alpha = 0.3, bins = 50) +  
+    theme_bw() +
+    xlab("Prior-posterior update check - slope by visit")
+
+
+
+p2 <- ggplot(real_Posterior_3) +
+  geom_histogram(aes(prior_sd_Child.ID__Intercept),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+   geom_histogram(aes(sd_Child.ID__Intercept),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +  
+    theme_bw() +
+    xlab("P-P update check - variability of intercepts")
+
+
+p3 <- ggplot(real_Posterior_3) +
+  geom_histogram(aes(prior_b_DiagnosisASD),
+                 fill = "red", color = "red", alpha = 0.3, bins = 50) +
+  geom_histogram(aes(b_DiagnosisASD),
+                 fill = "green", color = "green", alpha = 0.3, bins = 50) +
+   geom_histogram(aes(b_DiagnosisTD),
+                 fill = "yellow", color = "yellow", alpha = 0.3, bins = 50) +  
+    theme_bw() +
+    xlab("Prior-posterior update check - intercepts")
+
+
+#show them
+p0
+p1
+p2
+p3
+p4
+
+pacman::p_load("gridExtra")
+grid.arrange(p0,p1,p2,p3)
+
+glimpse(real_Posterior_3)
+```
+
+
+```{r}
+#summary
+summary(real_MLU_model3_posterior)
+
+
+
+#hypothesis
+hypothesis(real_MLU_model3_posterior, "DiagnosisASD:Visit<DiagnosisTD:Visit")
+hypothesis(MLU_f_posterior_no_0, "Visit<0.03", group = "Child.ID", scope="coef")
+
+
+
+
+
+#uncertainty of the slopw
+estimate <- real_MLU_model3_posterior %>%  
+    as_draws_df() %>% 
+    mutate(Effect = `b_DiagnosisTD:Visit` - `b_DiagnosisASD:Visit`) %>%  
+    dplyr::summarize(
+      EffectMean = mean(Effect),
+      EffectSE = sd(Effect),
+      EffectLowCI = quantile(Effect, 0.025),
+      EffectHighCI = quantile(Effect, 0.975),
+      EffectWidth = EffectHighCI - EffectLowCI,
+      ER = sum(Effect > 0) / sum(Effect <= 0),
+      Cred = sum(Effect > 0) / n()
+      ) 
+
+estimate
+
+?n()
+
+```
+
+### Prior Sensitivity Check
+
+#These results look interesting - however, we may be worried about the influence of our priors. Lets conduct a prior robustness check for this multi-level #model to calm our worries:
+
+```{r, results="hide", message=FALSE}
+ASD_prior_SD_real <- seq(0.01, 0.20, length.out = 20)
+#My priors
+ASD_priors_real <- MLU_f_prior  -
+
+#create empty sets to store output of the loop for ASD:
+real_posterior_prediction_ASD <- c()
+real_posterior_prediction_ASD_lci <- c()
+real_posterior_prediction_ASD_uci <- c()
+
+#Making all the priors we want to check (aka just changing the sd)
+real_sd_priors <- c(
+  prior(normal(0, 0.01), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.02), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.03), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.04), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.05), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.06), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.07), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.08), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.09), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.10), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.11), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.12), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.13), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.14), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.15), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.16), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.17), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.18), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.19), class = b, coef= "DiagASD:Visit"),
+  prior(normal(0, 0.20), class = b, coef= "DiagASD:Visit")
+)
+
+#loop through making priors with different sd
+for (i in seq(1, 20)) {
+  ASD_priors_real[4,] <- real_sd_priors[i,]
+  real_model_for_loop <- brm(
+    MLU_f,
+    data= d_real_no_0,
+    family = lognormal,
+    prior = ASD_priors_real,
+    sample_prior = T,
+    iter = 2000,
+    warmup = 1000,
+    backend = "cmdstanr",
+    threads = threading(2),
+    cores = 2,
+    chains = 2,
+    control = list(adapt_delta = 0.99, max_treedepth = 20)
+  )
+    
+  Model_for_loop_samp_real <- as_draws_df(real_model_for_loop)
+  #posterior_predictions <- spread_draws(model_for_loop, b_DiagASD:Visit) #slope, so b_DiagASD:Visit
+  real_posterior_predictions_ASD <- Model_for_loop_samp_real[,3]
+  real_posterior_prediction_ASD[i] <- median(real_posterior_predictions_ASD$`b_DiagASD:Visit`)
+  real_posterior_prediction_ASD_lci[i] <- quantile(real_posterior_predictions_ASD$`b_DiagASD:Visit`, prob = 0.025) #lower boundy for 95% interval
+  real_posterior_prediction_ASD_uci[i] <- quantile(real_posterior_predictions_ASD$`b_DiagASD:Visit`, prob = 0.975) #upper boundry for 95% interval
+}
+
+
+#Making dataframe from values from loop
+real_sensitivity_check_ASD <- data.frame(ASD_prior_SD_real, real_posterior_prediction_ASD, real_posterior_prediction_ASD_lci, real_posterior_prediction_ASD_uci) 
+
+#visualizing the sensitivity plot
+real_rubostness_check_asd <- ggplot(data=real_sensitivity_check_ASD, aes(x=ASD_prior_SD_real, y=real_posterior_prediction_ASD)) +
+  geom_point(size = 3) +
+  geom_pointrange(ymin = real_posterior_prediction_ASD_lci, ymax = real_posterior_prediction_ASD_uci) + #pointrange is 95% interval (vertical lines for each dot)
+  ylim(0.001, 0.20) + #range for the slope (y-aksis range)
+  labs(x="Standard Deviation of Slope Prior", 
+       y="Posterior Estimate for Slope", 
+       title="Sensitivity analysis for multi-level model ASD") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, size = 15),
+        axis.title.x = element_text(size = 13),
+        axis.text.y = element_text(size = 12),
+        axis.text.x = element_text(size = 12),
+        axis.title.y = element_text(size = 13))
+
+
+
+
+ggsave("true_real_rubostness_check_asd.pdf", plot=real_rubostness_check_asd)
+real_rubostness_check_asd
+
+```
+
+
+
+Part 3 - From explanation to prediction
+
+N.B. There are several datasets for this exercise, so pay attention to which one you are using!
+
+1. The (training) dataset from last time (the awesome one you produced :-) ).
+2. The (test) datasets on which you can test the models from last time:
+* Demographic and clinical data: https://www.dropbox.com/s/ra99bdvm6fzay3g/demo_test.csv?dl=1
+* Utterance Length data: https://www.dropbox.com/s/uxtqqzl18nwxowq/LU_test.csv?dl=1
+* Word data: https://www.dropbox.com/s/1ces4hv8kh0stov/token_test.csv?dl=1
+
+Relying on the model(s) you trained in part 2 of the exercise, create predictions for the test set and assess how well they do compared to the actual data.
+
+- Discuss the differences in performance of your model in training and testing data. Is the model any good?
+- Let's assume you are a speech therapy clinic. You want to assess whether the kids in your test sample will have a typical (like a TD) development, or they will have a worse one, in which case they should get speech therapy support. What do your predictions tell you about that? Which kids would you provide therapy for? Is the model any good?
+
+```{r}
+
+
+```
+
