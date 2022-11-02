@@ -1,0 +1,117 @@
+---
+title: "Untitled"
+output: html_document
+date: "2022-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+
+```{r}
+
+library(readxl)
+Matrix_MetaAnalysis<- read_excel("Matrix_MetaAnalysis_Diagnosis_updated290719.xlsx")
+view(Matrix_MetaAnalysis)
+
+
+pacman::p_load("metafor")
+PitchVari<-escalc("SMD",
+                  n1i=SAMPLE_SIZE_SZ, n2i=SAMPLE_SIZE_HC,
+                  m1i=PITCH_F0SD_SZ_M,
+                  m2i=PITCH_F0SD_HC_M,
+                  sd1i=PITCH_F0SD_SZ_SD,
+                  sd2i=PITCH_F0SD_HC_SD,
+                  data = Matrix_MetaAnalysis)
+
+glimpse(PitchVari)
+
+
+PitchM <- PitchVari %>% 
+  select(Article, SAMPLE_SIZE_SZ, SAMPLE_SIZE_HC, PITCH_F0SD_SZ_M, PITCH_F0SD_HC_M, PITCH_F0SD_SZ_SD, PITCH_F0SD_HC_SD, yi, vi, Authors)
+PitchMeta <- PitchMeta %>% 
+  rename("StudyEffect" = yi, "ObservedSigma" = vi)
+
+glimpse(PitchMeta)
+```
+
+
+```{r}
+Study <- bf(StudyEffect | se(ObservedSigma) ~ 1 + (1 | Article))
+
+prior <- c(
+  prior(normal(0,0.3),class=Intercept),
+  prior(normal(0,0.2),class=sd))
+
+Study_r <-
+  brm(
+    Study,
+    data = PitchM,
+    save_pars = save_pars(all = TRUE),
+    family = gaussian,
+    prior = Study_p,
+    #refit = "on_change",
+    sample_prior = T,
+    iter = 1000, 
+    warmup = 100,
+    cores = 2,
+    chains = 2,
+    backend = "cmdstanr",
+    threads = threading(4),
+    control = list(
+      adapt_delta = 0.99,
+      max_treedepth = 15 ),
+    stan_model_args=list(stanc_options = list("O1"))
+  )
+
+
+ranef(Study_r)
+
+
+
+```
+
+
+```{r}
+
+
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
